@@ -62,25 +62,7 @@ class _VaeHomePageState extends State<VaeHomePage> {
     });
 
     try {
-      final response = await http
-          .post(
-            Uri.parse(_endpoint),
-            headers: <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(<String, dynamic>{
-              'instances': <Map<String, int>>[
-                <String, int>{'digit': digit},
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 20));
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          'HTTP ${response.statusCode}. Respuesta: ${response.body}',
-        );
-      }
-
-      final dynamic decoded = jsonDecode(response.body);
+      final dynamic decoded = await _requestPrediction(digit);
       final Uint8List pngBytes = _extractPngFromResponse(decoded);
 
       setState(() {
@@ -99,14 +81,56 @@ class _VaeHomePageState extends State<VaeHomePage> {
     }
   }
 
+  Future<dynamic> _requestPrediction(int digit) async {
+    final List<Map<String, dynamic>> payloads = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'instances': <Map<String, int>>[
+          <String, int>{'digit': digit},
+        ],
+      },
+      <String, dynamic>{'instances': <int>[digit]},
+      <String, dynamic>{
+        'instances': <List<int>>[
+          <int>[digit],
+        ],
+      },
+      <String, dynamic>{'inputs': <int>[digit]},
+      <String, dynamic>{
+        'inputs': <List<int>>[
+          <int>[digit],
+        ],
+      },
+    ];
+
+    String? lastError;
+
+    for (final Map<String, dynamic> payload in payloads) {
+      final http.Response response = await http
+          .post(
+            Uri.parse(_endpoint),
+            headers: <String, String>{'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return jsonDecode(response.body);
+      }
+
+      lastError = 'HTTP ${response.statusCode}. Payload: $payload. Respuesta: ${response.body}';
+    }
+
+    throw Exception(lastError ?? 'No se pudo obtener respuesta válida del servidor.');
+  }
+
   Uint8List _extractPngFromResponse(dynamic decoded) {
     if (decoded is! Map<String, dynamic>) {
       throw Exception('Formato JSON no soportado.');
     }
 
-    final dynamic predictions = decoded['predictions'];
+    final dynamic predictions = decoded['predictions'] ?? decoded['outputs'];
     if (predictions is! List || predictions.isEmpty) {
-      throw Exception('No se encontraron "predictions" en la respuesta.');
+      throw Exception('No se encontraron "predictions" ni "outputs" en la respuesta.');
     }
 
     final dynamic first = predictions.first;
@@ -116,7 +140,8 @@ class _VaeHomePageState extends State<VaeHomePage> {
     }
 
     if (first is Map<String, dynamic>) {
-      final dynamic base64Image = first['image_base64'] ?? first['image'];
+      final dynamic base64Image =
+          first['image_base64'] ?? first['image'] ?? first['generated'];
       if (base64Image is String) {
         final String normalized = base64Image.contains(',')
             ? base64Image.split(',').last
@@ -124,7 +149,7 @@ class _VaeHomePageState extends State<VaeHomePage> {
         return base64Decode(normalized);
       }
 
-      final dynamic pixels = first['pixels'];
+      final dynamic pixels = first['pixels'] ?? first['values'];
       if (pixels is List) {
         return _pngFromFlatPixels(pixels);
       }
