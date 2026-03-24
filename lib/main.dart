@@ -71,7 +71,9 @@ class _VaeHomePageState extends State<VaeHomePage> {
     } catch (error) {
       setState(() {
         _errorMessage =
-            'No se pudo generar la imagen. Error: $error\n\n'
+            'No se pudo generar la imagen. Error: $error
+
+'
             'Si usas emulador Android, cambia localhost por 10.0.2.2.';
       });
     } finally {
@@ -82,22 +84,28 @@ class _VaeHomePageState extends State<VaeHomePage> {
   }
 
   Future<dynamic> _requestPrediction(int digit) async {
+    final List<double> mnistLikeInput = _digitToInputVector(digit);
+
     final List<Map<String, dynamic>> payloads = <Map<String, dynamic>>[
       <String, dynamic>{
-        'instances': <Map<String, int>>[
-          <String, int>{'digit': digit},
+        'instances': <List<double>>[mnistLikeInput],
+      },
+      <String, dynamic>{
+        'inputs': <List<double>>[mnistLikeInput],
+      },
+      <String, dynamic>{
+        'instances': <Map<String, List<double>>>[
+          <String, List<double>>{'inputs': mnistLikeInput},
         ],
       },
-      <String, dynamic>{'instances': <int>[digit]},
       <String, dynamic>{
-        'instances': <List<int>>[
-          <int>[digit],
+        'instances': <Map<String, List<double>>>[
+          <String, List<double>>{'x': mnistLikeInput},
         ],
       },
-      <String, dynamic>{'inputs': <int>[digit]},
       <String, dynamic>{
-        'inputs': <List<int>>[
-          <int>[digit],
+        'instances': <Map<String, List<double>>>[
+          <String, List<double>>{'input_1': mnistLikeInput},
         ],
       },
     ];
@@ -117,10 +125,87 @@ class _VaeHomePageState extends State<VaeHomePage> {
         return jsonDecode(response.body);
       }
 
-      lastError = 'HTTP ${response.statusCode}. Payload: $payload. Respuesta: ${response.body}';
+      lastError =
+          'HTTP ${response.statusCode}. El modelo espera un tensor distinto. '
+          'Payload: $payload. Respuesta: ${response.body}';
     }
 
     throw Exception(lastError ?? 'No se pudo obtener respuesta válida del servidor.');
+  }
+
+  List<double> _digitToInputVector(int digit) {
+    final img.Image canvas = img.Image(width: 28, height: 28);
+    img.fill(canvas, color: img.ColorRgb8(0, 0, 0));
+
+    const Map<int, List<String>> segmentMap = <int, List<String>>{
+      0: <String>['a', 'b', 'c', 'd', 'e', 'f'],
+      1: <String>['b', 'c'],
+      2: <String>['a', 'b', 'g', 'e', 'd'],
+      3: <String>['a', 'b', 'g', 'c', 'd'],
+      4: <String>['f', 'g', 'b', 'c'],
+      5: <String>['a', 'f', 'g', 'c', 'd'],
+      6: <String>['a', 'f', 'g', 'e', 'c', 'd'],
+      7: <String>['a', 'b', 'c'],
+      8: <String>['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+      9: <String>['a', 'b', 'c', 'd', 'f', 'g'],
+    };
+
+    void drawHorizontal(int y) {
+      for (int x = 8; x <= 19; x++) {
+        for (int t = -1; t <= 1; t++) {
+          final int yy = y + t;
+          if (yy >= 0 && yy < 28) {
+            canvas.setPixelRgb(x, yy, 255, 255, 255);
+          }
+        }
+      }
+    }
+
+    void drawVertical(int x, int y1, int y2) {
+      for (int y = y1; y <= y2; y++) {
+        for (int t = -1; t <= 1; t++) {
+          final int xx = x + t;
+          if (xx >= 0 && xx < 28) {
+            canvas.setPixelRgb(xx, y, 255, 255, 255);
+          }
+        }
+      }
+    }
+
+    for (final String segment in segmentMap[digit] ?? <String>[]) {
+      switch (segment) {
+        case 'a':
+          drawHorizontal(5);
+          break;
+        case 'b':
+          drawVertical(20, 6, 13);
+          break;
+        case 'c':
+          drawVertical(20, 14, 21);
+          break;
+        case 'd':
+          drawHorizontal(22);
+          break;
+        case 'e':
+          drawVertical(7, 14, 21);
+          break;
+        case 'f':
+          drawVertical(7, 6, 13);
+          break;
+        case 'g':
+          drawHorizontal(14);
+          break;
+      }
+    }
+
+    final List<double> vector = <double>[];
+    for (int y = 0; y < 28; y++) {
+      for (int x = 0; x < 28; x++) {
+        final img.Pixel pixel = canvas.getPixel(x, y);
+        vector.add(pixel.r / 255.0);
+      }
+    }
+    return vector;
   }
 
   Uint8List _extractPngFromResponse(dynamic decoded) {
